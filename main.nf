@@ -52,6 +52,7 @@ if (params.has_bam) {
    process pbio_bamify {
      cpus params.bamify_cpus
      memory params.bamify_mem
+     maxForks 5
      errorStrategy 'finish'
      input:
        path(fq) from input_ch
@@ -61,7 +62,7 @@ if (params.has_bam) {
      script:
        the_id = fq.baseName
        """
-       ls $fq/*.fa*gz   > files.fofn
+       ls $fq/*.f*q.gz   > files.fofn
        pbmm2 align $ref_mmi  files.fofn ${the_id}.bam --preset HIFI --rg '@RG\tID:$the_id\tSM:$the_id' --unmapped --sort 
        """
    }
@@ -120,7 +121,8 @@ process phaseVCFs {
   script:
    phased_vcf = "${name}_${chrom}_phased.vcf.gz"
    """
-      whatshap phase \
+      hostname
+      /opt/exp_soft/python37/bin/whatshap phase \
         --output $phased_vcf \
         --reference  $ref_seq \
         --chromosome $chrom \
