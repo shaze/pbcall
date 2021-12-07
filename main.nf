@@ -125,7 +125,7 @@ process phaseVCFs {
       /opt/exp_soft/python37/bin/whatshap phase \
         --output $phased_vcf \
         --reference  $ref_seq \
-        --chromosome $chrom \
+        --chromosome chr$chrom \
         $unphased \
         $bam
       tabix -p vcf $phased_vcf
