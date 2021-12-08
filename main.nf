@@ -103,7 +103,7 @@ process deepcall {
                 --reads  $bam  \
                 --output_vcf $vcf \
                 --num_shards 16 \
-                --regions chr$chrom
+                --regions ${params.chrom_prefix}$chrom
 
       """
 }
@@ -125,7 +125,7 @@ process phaseVCFs {
       /opt/exp_soft/python37/bin/whatshap phase \
         --output $phased_vcf \
         --reference  $ref_seq \
-        --chromosome $chrom \
+        --chromosome ${params.chrom_prefix}$chrom \
         $unphased \
         $bam
       tabix -p vcf $phased_vcf
