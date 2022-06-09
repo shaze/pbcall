@@ -1,7 +1,7 @@
 
 // (c) University of the Witwatersrand, Johannesburg
 // Author Scott Hazelhurst
-// Released under https://creativecommons.org/licenses/by-sa/4.0/
+// Realeased under MIT Licence
 
 
 nextflow.enable.dsl=2
@@ -9,6 +9,10 @@ nextflow.enable.dsl=2
 params.output = "sample"
 params.has_bam = false
 trf = file(params.tandem_example)
+
+ref_seq=file(params.ref_seq)
+ref_fai=file(params.ref_fai)
+ref_mmi=file(params.ref_mmi)
 
 params.chrom_prefix="chr"
 
@@ -45,13 +49,13 @@ def getBAMs(fnames) {
 process pbio_bamify {
      cpus params.bamify_cpus
      memory params.bamify_mem
-     maxForks 5
+     maxForks 8
      errorStrategy 'finish'
      input:
-       path (fq)
+       path(fq)
      output:
-       tuple val(the_id), file("${the_id}.bam"), file("${the_id}.bam.bai"), emit 'bam'
-     publishDir params.bam
+      tuple val(the_id), file("${the_id}.bam"), file("${the_id}.bam.bai"), emit: 'bam'
+     storeDir params.bam
      script:
        the_id = fq.baseName
        """
@@ -68,6 +72,7 @@ chroms    = autosomes +  ['X','Y','M']
 // Note that this is done per chromosome
 // -- so for each sample of input we have multiple processes running
 process deepcall {
+  maxForks 40  
   label 'deepvariant'
   cpus params.call_cpus
   memory params.call_mem
@@ -75,19 +80,19 @@ process deepcall {
   if (params.constraint)
      clusterOptions="--constraint=${params.constraint}"
   input:
-     tuple val(the_id), file(bam), file(bai) from bam_file1
+     tuple val(the_id), file(bam), file(bai) 
      file ref_seq
      file ref_fai
      each chroms
   output:
-    tuple val(the_id), val(chrom), file(vcf), file(tbi), \
+    tuple val(the_id), val(chroms), file(vcf), file(tbi), \
 	  file(bam), file(bai) 
   script:
      name = bam.simpleName
-     if (['X','Y','M'].contains(chrom))
-        c=chrom
+     if (['X','Y','M'].contains(chroms))
+        c=chroms
      else
-        c = "${chrom}".padLeft(2,"0")
+        c = "${chroms}".padLeft(2,"0")
      vcf = "${name}-${c}-unphased.vcf.gz"
      tbi = "${vcf}.tbi"
      """
@@ -98,7 +103,7 @@ process deepcall {
                 --reads  $bam  \
                 --output_vcf $vcf \
                 --num_shards 16 \
-                --regions chr$chrom
+                --regions chr$chroms
 
       """
 }
@@ -168,7 +173,6 @@ process deepcall2 {
      file(ref_fai)
   output:
     tuple val(the_id), file(phased_vcf), file(tbi), emit: 'called'
-  publishDir params.vcf
   script:
      name = phased_bam.simpleName
      if (['X','Y','M'].contains(chrom))
@@ -189,6 +193,21 @@ process deepcall2 {
        --regions ${params.chrom_prefix}$chrom
       """
 }
+
+process vcfConcat {
+  input:
+      tuple val(id), file(vcfs)
+  output:
+    tuple file("result/${id}.vcf.gz"), file("result/${id}.vcf.gz.tbi")
+  publishDir params.vcf
+  script:
+    """"
+    mkdir result
+    bcftools concat *vcf -Oz -o result/${id}.vcf.gz
+    bcftools index result/${id}.vcf.gz
+    """
+}
+    
 
 process discover {
 
@@ -212,10 +231,9 @@ process pbsvcall {
      file(sigs) 
      file(ref_seq)
   output:
-     tuple file("${vcf}.gz"), file("${vcf}.gz.tbi") into pbs_call_ch
+     tuple file("${vcf}.gz"), file("${vcf}.gz.tbi") 
   memory "12GB"
   errorStrategy 'finish'
-  publishDir "${params.vcf}/"
   script:
   vcf = "${params.out}.vcf"
      """
@@ -231,13 +249,14 @@ workflow {
     if (params.has_bam) {
        bf = getBAMs(fnames)
     }  else {
-	pbio_bamify(fnames)
+	pbio_bamify(Channel.fromPath(fnames))
         bf=pbio_bamify.out.bam
     }
     deepcall(bf,ref_seq,ref_fai,chroms)
-    phaseVCFs(deepcall.out.bam,ref_seq,ref_fai)
+    phaseVCFs(deepcall.out, ref_seq,ref_fai)
     haplotag(phaseVCFs.out.phased_vcf, ref_seq, ref_fai)
-    deepcalll(haplotag.out.haplotag, ref_seq, ref_fai)
+    deepcall2(haplotag.out.haplotag, ref_seq, ref_fai)
+    vcfConcat(deepcall2.out.called.groupTuple())
     discover(bf,trf)
-    pbsvcall(bf.out.collect(), ref_seq)
+    pbsvcall(discover.out.collect(), ref_seq)
 }
